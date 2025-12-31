@@ -25,6 +25,11 @@ typedef struct {
 } OpeningCost;
 
 typedef struct {
+    int key;
+    bool value;
+} FacilityOpened;
+
+typedef struct {
     int key;    // client
     bool value; // true = unconnected, false = connected
 } UsedClients;
@@ -57,6 +62,27 @@ typedef struct {
     size_t n_clients;
     ConnectionCost* connection_costs;
 } Data;
+
+void init_data(Data* data) {
+    data->clients          = NULL;
+    data->facilities       = NULL;
+    data->connection_costs = NULL;
+    data->opening_costs    = NULL;
+}
+
+void free_data(Data* data) {
+    arrfree(data->facilities);
+    arrfree(data->clients);
+    hmfree(data->connection_costs);
+    hmfree(data->opening_costs);
+}
+
+void free_assignments(Data* data, Assignment* assignments) {
+    for (size_t i = 0; i < data->n_facilities; i++) {
+        arrfree(assignments[i].clients);
+    }
+    arrfree(assignments);
+}
 
 // Compare function for qsort
 int compare_pairs(const void* a, const void* b) {
@@ -116,6 +142,7 @@ int read_ints_from_line(FILE* fp, int* buffer) {
 }
 
 bool read_problem_data(char* filename, Data* data) {
+
     FILE* fp = fopen(filename, "r");
     if (!fp) {
         fprintf(stderr, "Error: Could not open file '%s'\n", filename);
@@ -169,31 +196,28 @@ double connection_cost(Data* data, int client, int facility) {
     return hmget(data->connection_costs, p);
 }
 
-double opening_cost(Data* data, int facility) { 
-    return hmget(data->opening_costs, facility); 
-}
+double opening_cost(Data* data, int facility) { return hmget(data->opening_costs, facility); }
 
 double flp(Data* data, Assignment** assignment) {
-    size_t n_facilities = data->n_facilities;
-    size_t n_clients    = data->n_clients;
+    Assignment* tmp_assignment = NULL;
+    size_t n_facilities        = data->n_facilities;
+    size_t n_clients           = data->n_clients;
 
     // Initialize assignments
     for (size_t i = 0; i < n_facilities; i++) {
         Assignment a = {.count = 0, .facility = data->facilities[i], .clients = NULL};
-        arrpush(*assignment, a);
+        arrpush(tmp_assignment, a);
     }
 
-    int t = 0;
+    int t          = 0;
     UsedClients* U = NULL;
-    
-    // Track which facilities have been opened (to avoid counting opening cost multiple times)
-    typedef struct { int key; bool value; } FacilityOpened;
+
     FacilityOpened* opened = NULL;
 
     for (size_t i = 0; i < n_clients; i++) {
         hmput(U, data->clients[i], true);
     }
-    
+
     for (size_t i = 0; i < n_facilities; i++) {
         hmput(opened, data->facilities[i], false);
     }
@@ -210,31 +234,26 @@ double flp(Data* data, Assignment** assignment) {
         }
         qsort(cost_matrix[i], n_facilities, sizeof(FacilityClientPair), compare_pairs);
     }
-    print_cost_matrix(cost_matrix, n_clients, n_facilities);
+    // print_cost_matrix(cost_matrix, n_clients, n_facilities);
 
     // Initialize cost effectiveness matrix
     CostEffectivenessMatrix* ce = NULL;
     for (size_t i = 0; i < n_facilities; i++) {
         CostEffectivenessMatrix c = {
-            .facility   = data->facilities[i],
-            .threshold  = -1,
-            .count      = 0,
-            .cost_ratio = 0.0,
-            .clients    = NULL
-        };
+            .facility = data->facilities[i], .threshold = -1, .count = 0, .cost_ratio = 0.0, .clients = NULL};
         arrpush(ce, c);
     }
 
     size_t n_unassigned = n_clients;
-    while (n_unassigned > 0 && t < (int)n_facilities) {
+    while (n_unassigned > 0 && t < (int) n_facilities) {
         // Create temporary arrays for this iteration
-        int** facility_clients = NULL;   // array of arrays
-        double** facility_costs = NULL;  // array of arrays
-        size_t* facility_counts = NULL;  // simple counts array
-        
+        int** facility_clients  = NULL; // array of arrays
+        double** facility_costs = NULL; // array of arrays
+        size_t* facility_counts = NULL; // simple counts array
+
         // Initialize per-facility arrays
         for (size_t i = 0; i < n_facilities; i++) {
-            int* clients = NULL;
+            int* clients  = NULL;
             double* costs = NULL;
             arrpush(facility_clients, clients);
             arrpush(facility_costs, costs);
@@ -244,15 +263,15 @@ double flp(Data* data, Assignment** assignment) {
         // Get all the pairs at rank t
         for (size_t i = 0; i < n_clients; i++) {
             int client = data->clients[i];
-            
+
             // If client is already assigned, skip it
             if (!hmget(U, client)) {
                 continue;
             }
 
             int facility = cost_matrix[i][t].facility;
-            double cost = cost_matrix[i][t].cost;
-            
+            double cost  = cost_matrix[i][t].cost;
+
             // Find facility index
             size_t fac_idx = 0;
             for (size_t j = 0; j < n_facilities; j++) {
@@ -261,7 +280,7 @@ double flp(Data* data, Assignment** assignment) {
                     break;
                 }
             }
-            
+
             arrpush(facility_clients[fac_idx], client);
             arrpush(facility_costs[fac_idx], cost);
             facility_counts[fac_idx]++;
@@ -269,38 +288,37 @@ double flp(Data* data, Assignment** assignment) {
 
         // Compute cost effectiveness for each facility
         for (size_t i = 0; i < n_facilities; i++) {
-            int facility = data->facilities[i];
+            int facility        = data->facilities[i];
             size_t ce_n_clients = facility_counts[i];
-            
+
             if (ce_n_clients == 0) {
                 continue;
             }
-            
+
             double cost_ratio = 0;
             for (size_t j = 0; j < ce_n_clients; j++) {
                 cost_ratio += facility_costs[i][j];
             }
-            
+
             // Only add opening cost if facility hasn't been opened yet
             if (!hmget(opened, facility)) {
                 cost_ratio += opening_cost(data, facility);
             }
-            
+
             cost_ratio = cost_ratio / (double) ce_n_clients;
 
             if (ce[i].count > 0) {
-                if (cost_ratio > ce[i].cost_ratio ||
-                    (cost_ratio == ce[i].cost_ratio && ce_n_clients < ce[i].count)) {
+                if (cost_ratio > ce[i].cost_ratio || (cost_ratio == ce[i].cost_ratio && ce_n_clients < ce[i].count)) {
                     continue;
                 }
             }
-            
+
             // Update cost effectiveness
             ce[i].facility   = facility;
             ce[i].threshold  = t;
             ce[i].count      = ce_n_clients;
             ce[i].cost_ratio = cost_ratio;
-            
+
             // Free old clients array and create new one
             arrfree(ce[i].clients);
             ce[i].clients = NULL;
@@ -310,16 +328,15 @@ double flp(Data* data, Assignment** assignment) {
         }
 
         // Find best facility
-        double best_cost = INFINITY;
-        int best_facility_idx = -1;
+        double best_cost         = INFINITY;
+        int best_facility_idx    = -1;
         size_t best_client_count = 0;
 
         for (size_t i = 0; i < n_facilities; i++) {
             if (ce[i].count < 1) {
                 continue;
             }
-            if (ce[i].cost_ratio < best_cost ||
-                (ce[i].cost_ratio == best_cost && ce[i].count > best_client_count)) {
+            if (ce[i].cost_ratio < best_cost || (ce[i].cost_ratio == best_cost && ce[i].count > best_client_count)) {
                 best_cost         = ce[i].cost_ratio;
                 best_client_count = ce[i].count;
                 best_facility_idx = i;
@@ -346,15 +363,16 @@ double flp(Data* data, Assignment** assignment) {
             hmput(U, client, false);
             n_unassigned--;
         }
-        
+
         // Mark facility as opened
         hmput(opened, best_facility, true);
 
-        // Add clients to assignment
+        // Add clients to assignment - work with pointer to modify in place
         for (size_t i = 0; i < best_client_count; i++) {
-            arrpush((*assignment)[best_facility_idx].clients, ce[best_facility_idx].clients[i]);
-            (*assignment)[best_facility_idx].count++;
+            int client_to_add = ce[best_facility_idx].clients[i];
+            arrpush((tmp_assignment)[best_facility_idx].clients, client_to_add);
         }
+        tmp_assignment[best_facility_idx].count = arrlen(tmp_assignment[best_facility_idx].clients);
 
         ce[best_facility_idx].count = 0; // don't use this set again
         t++;
@@ -363,7 +381,7 @@ double flp(Data* data, Assignment** assignment) {
     // Calculate total cost
     double total_cost = 0;
     for (size_t i = 0; i < n_facilities; i++) {
-        Assignment a = (*assignment)[i];
+        Assignment a = tmp_assignment[i];
         if (a.count < 1) {
             continue;
         }
@@ -379,48 +397,43 @@ double flp(Data* data, Assignment** assignment) {
     for (size_t i = 0; i < n_facilities; i++) {
         arrfree(ce[i].clients);
     }
+	
+	
+	// copy tmp_assignment into assignment
+    *assignment = tmp_assignment;  // Just assign the pointer
+	
     arrfree(ce);
     hmfree(U);
     hmfree(opened);
-
     return total_cost;
 }
 
+#ifndef TEST_BUILD
 int main(int argc, char** argv) {
     Data data = {0};
-    data.clients = NULL;
-    data.facilities = NULL;
-    data.connection_costs = NULL;
-    data.opening_costs = NULL;
+
+	char* filename = "example.txt";
 
     // Check if a filename was provided
-    if (argc > 1) {
-        // Read from file
-        if (!read_problem_data(argv[1], &data)) {
-            return 1;
-        }
-    } else {
-        printf("No input file provided. Using hardcoded test data.\n");
-        printf("Usage: %s <input_file>\n", argv[0]);
-        return 1;
-    }
+    // if (argc > 1) {
+    //     if (!read_problem_data(argv[1], &data)) {
+    //         return 1;
+    //     }
+    // } else {
+    //     printf("No input file provided\n");
+    //     printf("Usage: %s <input_file>\n", argv[0]);
+    //     return 1;
+    // }
 
-    Assignment* M = NULL;
+    read_problem_data(filename, &data);
+    Assignment* assignments = NULL;
 
-    double total_cost = flp(&data, &M);
+    double total_cost = flp(&data, &assignments);
     printf("total cost: %f\n", total_cost);
 
-    print_assignment(M, data.n_facilities);
-
-    // Cleanup
-    for (size_t i = 0; i < data.n_facilities; i++) {
-        arrfree(M[i].clients);
-    }
-    arrfree(M);
-    arrfree(data.facilities);
-    arrfree(data.clients);
-    hmfree(data.connection_costs);
-    hmfree(data.opening_costs);
+    print_assignment(assignments, data.n_facilities);
+    free_assignments(&data, assignments);
 
     return 0;
 }
+#endif // TEST_BUILD
