@@ -1,4 +1,9 @@
 bin/
 build/
+test/build/
+test/bin/
+*.d
+*.o
 .cache/
 compile_commands.json
+var/
