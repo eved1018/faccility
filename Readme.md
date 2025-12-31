@@ -1,7 +1,5 @@
 # Facility Location Problem Solver
 
-# Facility Location Problem Solver
-
 A C implementation of a greedy approximation algorithm for solving the uncapacitated facility location problem. Implemention is based on: https://www.jsoftware.us/index.php?m=content&c=index&a=show&catid=88&id=1445
 
 
