@@ -7,6 +7,16 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
+
+
+// Facility Location Problem: 
+
+
+
+
+
+//  based on: https://www.jsoftware.us/index.php?m=content&c=index&a=show&catid=88&id=1445
+
 #define BUFFER_SIZE 1024
 
 typedef struct {
