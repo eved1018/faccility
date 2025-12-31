@@ -412,20 +412,17 @@ double flp(Data* data, Assignment** assignment) {
 int main(int argc, char** argv) {
     Data data = {0};
 
-	char* filename = "example.txt";
-
     // Check if a filename was provided
-    // if (argc > 1) {
-    //     if (!read_problem_data(argv[1], &data)) {
-    //         return 1;
-    //     }
-    // } else {
-    //     printf("No input file provided\n");
-    //     printf("Usage: %s <input_file>\n", argv[0]);
-    //     return 1;
-    // }
+    if (argc > 1) {
+        if (!read_problem_data(argv[1], &data)) {
+            return 1;
+        }
+    } else {
+        printf("No input file provided\n");
+        printf("Usage: %s <input_file>\n", argv[0]);
+        return 1;
+    }
 
-    read_problem_data(filename, &data);
     Assignment* assignments = NULL;
 
     double total_cost = flp(&data, &assignments);
